@@ -1,7 +1,7 @@
 [package]
 name = "shell_server"
-version = "0.1.0"
-description = "MCP Server exposing exec_command for container shell execution"
+version = "0.2.0"
+description = "MCP Server providing exec_command (local or container mode)"
 authors = ["Tagentacle Contributors"]
 type = "executable"
 
@@ -10,4 +10,5 @@ node = "shell_server:main"
 
 [dependencies]
 python = ["tagentacle-py-mcp"]
-system = ["docker"]
+# docker is optional — only needed when TARGET_CONTAINER is set
+# system = ["docker"]

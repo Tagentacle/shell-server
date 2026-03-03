@@ -1,13 +1,15 @@
 [project]
 name = "shell-server"
-version = "0.1.0"
-description = "MCP Server node providing exec_command for Tagentacle container shell execution"
+version = "0.2.0"
+description = "MCP Server providing exec_command (local or container mode)"
 requires-python = ">=3.10"
 dependencies = [
     "tagentacle-py-core>=0.1.0",
     "tagentacle-py-mcp>=0.2.0",
-    "docker>=7.0.0",
 ]
+
+[project.optional-dependencies]
+container = ["docker>=7.0.0"]
 
 [tool.uv.sources]
 tagentacle-py-core = { path = "../python-sdk-core", editable = true }
