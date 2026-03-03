@@ -1,7 +1,7 @@
 [package]
 name = "shell_server"
 version = "0.2.0"
-description = "MCP Server providing exec_command (local or container mode)"
+description = "MCP Server providing exec_command (TACL space / container / local)"
 authors = ["Tagentacle Contributors"]
 type = "executable"
 

@@ -1,17 +1,27 @@
 """
 Tagentacle Shell Server: MCP Server for Shell Execution.
 
-An MCPServerNode that provides a single ``exec_command`` tool. Can operate
-in two modes depending on startup configuration:
+An MCPServerNode that provides a single ``exec_command`` tool.  Supports
+three execution modes:
 
-  - **Local mode** (default): executes commands via subprocess on the host.
-  - **Container mode** (``TARGET_CONTAINER=xxx``): executes via ``docker exec``.
+  - **TACL mode** (``auth_required=True``, recommended for production):
+    Each agent's JWT carries a ``space`` claim identifying its isolated
+    execution environment (Docker container).  One shell-server instance
+    serves multiple agents, dynamically routing commands based on the
+    caller's ``space``.
+
+  - **Static container mode** (``TARGET_CONTAINER=xxx``):
+    All commands are routed to a single, fixed Docker container.
+    Useful for development / single-agent setups.
+
+  - **Local mode** (default):
+    Commands run on the host via ``subprocess``.
 
 Key design:
   - Single tool: exec_command
   - Maintains per-session ``cwd`` state (simulates a persistent shell)
-  - Container is an optional startup parameter, not a hard requirement
-  - Can be TACL-protected: ``auth_required=True``
+  - TACL ``space`` claim is the primary container resolution mechanism
+  - Docker dependency is optional — only needed when containers are used
 """
 
 import asyncio
@@ -23,22 +33,19 @@ from typing import Annotated, Any, Dict, Optional
 from pydantic import Field
 
 from tagentacle_py_mcp import MCPServerNode
+from tagentacle_py_mcp.auth import get_caller_identity
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class ShellServer(MCPServerNode):
-    """MCP Server providing exec_command.
+    """MCP Server providing exec_command with dynamic container routing.
 
-    Execution backend is determined at startup:
-      - No container specified → local subprocess
-      - Container specified → docker exec
-
-    Container can be set via:
-      1. Constructor ``target_container`` parameter
-      2. ``TARGET_CONTAINER`` environment variable
-      3. ``target_container`` in bringup config
+    Container resolution order:
+      1. TACL JWT ``space`` claim (per-request, from caller identity)
+      2. Static ``target_container`` (startup config / env)
+      3. Local subprocess (fallback when no container is specified)
     """
 
     def __init__(
@@ -53,27 +60,34 @@ class ShellServer(MCPServerNode):
             node_id,
             mcp_name="shell-server",
             mcp_port=mcp_port,
-            description="Shell execution MCP server (local or container)",
+            description="Shell execution MCP server (TACL / container / local)",
             auth_required=auth_required,
         )
-        self._target_container = (
+        self._static_container = (
             target_container or os.environ.get("TARGET_CONTAINER") or None
         )
-        self._docker = None  # Lazy-init only when container mode
+        self._docker = None  # Lazy-init when first container exec is needed
         # Per-session cwd tracking: session_key -> cwd path
         self._session_cwd: Dict[str, str] = {}
 
-    @property
-    def container_mode(self) -> bool:
-        """Whether this server targets a Docker container."""
-        return self._target_container is not None
+    def _resolve_space(self) -> Optional[str]:
+        """Resolve the target container for the current request.
 
-    @property
-    def target_container(self) -> Optional[str]:
-        return self._target_container
+        Priority: TACL JWT space > static startup config.
+        Returns None for local execution.
+        """
+        # 1. Dynamic: read from TACL JWT
+        caller = get_caller_identity()
+        if caller and caller.space:
+            return caller.space
+        # 2. Static fallback
+        return self._static_container
 
     def _get_cwd(self, session_key: str) -> str:
-        return self._session_cwd.get(session_key, os.getcwd() if not self.container_mode else "/")
+        return self._session_cwd.get(
+            session_key,
+            "/" if session_key != "_local_" else os.getcwd(),
+        )
 
     def _set_cwd(self, session_key: str, cwd: str):
         self._session_cwd[session_key] = cwd
@@ -101,9 +115,10 @@ class ShellServer(MCPServerNode):
         except Exception as e:
             return (1, "", str(e))
 
-    def _exec_container(self, command: str, workdir: str) -> tuple:
+    def _exec_container(self, container_name: str, command: str, workdir: str) -> tuple:
         """Execute via docker exec. Returns (exit_code, stdout, stderr)."""
-        container = self._docker.containers.get(self._target_container)
+        self._ensure_docker()
+        container = self._docker.containers.get(container_name)
         exit_code, output = container.exec_run(
             ["sh", "-c", command],
             workdir=workdir,
@@ -113,50 +128,54 @@ class ShellServer(MCPServerNode):
         stderr = output[1].decode("utf-8", errors="replace") if output[1] else ""
         return exit_code, stdout, stderr
 
-    def _exec(self, command: str, workdir: str) -> tuple:
-        """Route to the appropriate backend."""
-        if self.container_mode:
-            return self._exec_container(command, workdir)
+    def _exec(self, space: Optional[str], command: str, workdir: str) -> tuple:
+        """Route to the appropriate backend based on resolved space."""
+        if space:
+            return self._exec_container(space, command, workdir)
         else:
             return self._exec_local(command, workdir)
+
+    def _ensure_docker(self):
+        """Lazily initialize Docker client on first container exec."""
+        if self._docker is not None:
+            return
+        try:
+            import docker
+            docker_url = os.environ.get("DOCKER_HOST")
+            if docker_url:
+                self._docker = docker.DockerClient(base_url=docker_url)
+            else:
+                self._docker = docker.from_env()
+            self._docker.ping()
+            logger.info("Docker client connected (lazy init)")
+        except Exception as e:
+            raise RuntimeError(f"Docker unavailable: {e}") from e
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
     def on_configure(self, config: Dict[str, Any]):
-        """Register MCP tools. Connect to Docker only if container mode."""
+        """Register MCP tools."""
         if "target_container" in config:
-            self._target_container = config["target_container"]
-
-        # Only connect to Docker if targeting a container
-        if self.container_mode:
-            try:
-                import docker
-                from docker.errors import DockerException
-                docker_url = config.get("docker_url") or os.environ.get("DOCKER_HOST")
-                if docker_url:
-                    self._docker = docker.DockerClient(base_url=docker_url)
-                else:
-                    self._docker = docker.from_env()
-                self._docker.ping()
-                logger.info(f"Container mode: targeting '{self._target_container}'")
-            except (ImportError, DockerException) as e:
-                logger.error(f"Container mode requested but Docker unavailable: {e}")
-                raise
-        else:
-            logger.info("Local mode: executing commands on host")
+            self._static_container = config["target_container"]
 
         # ── Register MCP Tool ───────────────────────────────────────
 
-        @self.mcp.tool(description="Execute a shell command. Maintains cwd across calls.")
+        @self.mcp.tool(description=(
+            "Execute a shell command. "
+            "Target is resolved from TACL space claim, "
+            "static container config, or local host. "
+            "Maintains cwd across calls."
+        ))
         def exec_command(
             command: Annotated[str, Field(description="Shell command to execute")],
             cwd: Annotated[Optional[str], Field(description="Override working directory for this command")] = None,
         ) -> str:
-            session_key = self._target_container or "_local_"
+            space = self._resolve_space()
+            session_key = space or "_local_"
             effective_cwd = cwd or self._get_cwd(session_key)
 
             try:
-                exit_code, stdout, stderr = self._exec(command, effective_cwd)
+                exit_code, stdout, stderr = self._exec(space, command, effective_cwd)
             except Exception as e:
                 return f"Execution error: {e}"
 
@@ -165,6 +184,7 @@ class ShellServer(MCPServerNode):
             if stripped.startswith("cd ") or stripped == "cd":
                 try:
                     _, new_cwd, _ = self._exec(
+                        space,
                         f"cd {effective_cwd} && {stripped} && pwd",
                         effective_cwd,
                     )
@@ -207,23 +227,27 @@ class ShellServer(MCPServerNode):
 
 async def main():
     port = int(os.environ.get("MCP_PORT", "8300"))
-    target = os.environ.get("TARGET_CONTAINER")
+    static = os.environ.get("TARGET_CONTAINER")
     auth = os.environ.get("SHELL_AUTH_REQUIRED", "").lower() in ("1", "true", "yes")
 
     node = ShellServer(
         mcp_port=port,
         auth_required=auth,
-        target_container=target,
+        target_container=static,
     )
 
     config = {}
-    if target:
-        config["target_container"] = target
+    if static:
+        config["target_container"] = static
 
     await node.bringup(config)
 
-    mode = f"container '{target}'" if target else "local"
-    logger.info(f"Shell Server ready at {node.mcp_url} (mode: {mode})")
+    if auth:
+        logger.info(f"Shell Server ready at {node.mcp_url} (TACL auth, space from JWT)")
+    elif static:
+        logger.info(f"Shell Server ready at {node.mcp_url} (static container: {static})")
+    else:
+        logger.info(f"Shell Server ready at {node.mcp_url} (local mode)")
     await node.spin()
 
 

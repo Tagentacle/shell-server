@@ -1,7 +1,7 @@
 [project]
 name = "shell-server"
 version = "0.2.0"
-description = "MCP Server providing exec_command (local or container mode)"
+description = "MCP Server providing exec_command (TACL space / container / local)"
 requires-python = ">=3.10"
 dependencies = [
     "tagentacle-py-core>=0.1.0",

@@ -1,9 +1,10 @@
 # shell-server
 
-MCP Server providing `exec_command` — a single tool for shell execution. Supports two modes:
+MCP Server providing `exec_command` — a single tool for shell execution. Supports three modes:
 
-- **Local mode** (default): runs commands on the host via `subprocess`
-- **Container mode**: runs commands inside a Docker container via `docker exec`
+- **TACL mode** (recommended): `auth_required=True` — each agent's JWT carries a `space` claim identifying its Docker container. One shell-server serves all agents, routing dynamically.
+- **Static container mode**: `TARGET_CONTAINER=xxx` — all commands go to one fixed container.
+- **Local mode** (default): runs commands on the host via `subprocess`.
 
 Reading files, writing files, listing directories — these are all just shell commands (`cat`, `tee`, `ls`).
 
@@ -22,14 +23,27 @@ uv sync
 # Local mode (default) — execute on host
 python shell_server.py
 
-# Container mode — execute inside a Docker container
+# Static container mode — execute inside a fixed container
 TARGET_CONTAINER=agent_space_1 python shell_server.py
 
-# Install docker extra for container mode
+# TACL mode — dynamic routing from JWT space claim (production)
+SHELL_AUTH_REQUIRED=true python shell_server.py
+
+# Install docker extra for container modes
 uv sync --extra container
 ```
 
 The MCP endpoint will be available at `http://127.0.0.1:8300/mcp`.
+
+## Container Resolution
+
+When `exec_command` is called, the target is resolved in this order:
+
+1. **TACL JWT `space` claim** — if `auth_required=True` and the caller's JWT contains a `space` field, that value is used as the Docker container name.
+2. **Static `TARGET_CONTAINER`** — fallback if no `space` in JWT.
+3. **Local subprocess** — if no container is resolved at all.
+
+This means a single shell-server instance can serve many agents, each routed to their own container based on their TACL credential.
 
 ## Configuration
 
@@ -37,40 +51,49 @@ The MCP endpoint will be available at `http://127.0.0.1:8300/mcp`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `TARGET_CONTAINER` | _(none)_ | Container name/id to target. Omit for local mode |
+| `SHELL_AUTH_REQUIRED` | `false` | Enable TACL JWT authentication (recommended) |
+| `TARGET_CONTAINER` | _(none)_ | Static container fallback. Omit for local mode |
 | `MCP_PORT` | `8300` | HTTP port for MCP endpoint |
-| `SHELL_AUTH_REQUIRED` | `false` | Require TACL JWT authentication |
 | `TAGENTACLE_DAEMON_URL` | `tcp://127.0.0.1:19999` | Daemon address |
-| `DOCKER_HOST` | _(system default)_ | Docker daemon socket URL (container mode only) |
+| `DOCKER_HOST` | _(system default)_ | Docker daemon socket URL (container modes only) |
 
 ### Bringup Config
 
 ```toml
+# TACL mode (production) — space comes from JWT
+[nodes.shell_server]
+pkg = "shell-server"
+config = { mcp_port = 8300, auth_required = true }
+
+# Static container mode (dev)
+[nodes.shell_server]
+pkg = "shell-server"
+config = { target_container = "agent_space_1", mcp_port = 8300 }
+
 # Local mode
 [nodes.shell_server]
 pkg = "shell-server"
 config = { mcp_port = 8300 }
-
-# Container mode
-[nodes.shell_server]
-pkg = "shell-server"
-config = { target_container = "agent_space_1", mcp_port = 8300 }
 ```
 
 ## How It Works
 
 ```
+# TACL mode: JWT space → container routing
+Agent A (space=container_1) ──MCP──► shell-server ──docker exec──► container_1
+Agent B (space=container_2) ──MCP──► shell-server ──docker exec──► container_2
+
+# Static mode
+Agent ──MCP──► shell-server ──docker exec──► fixed container
+
 # Local mode
 Agent ──MCP──► shell-server ──subprocess──► host shell
-
-# Container mode
-Agent ──MCP──► shell-server ──docker exec──► container
 ```
 
-- **Dual mode**: No `TARGET_CONTAINER` → local subprocess; with `TARGET_CONTAINER` → docker exec. Determined at startup.
-- **cwd tracking**: `exec_command` maintains a working directory per session. `cd /workspace` persists for subsequent commands.
-- **TACL support**: Set `SHELL_AUTH_REQUIRED=true` to require JWT auth.
-- **Docker optional**: The `docker` Python package is only needed for container mode (`uv sync --extra container`).
+- **TACL space binding**: When admin registers an agent via `PermissionMCPServerNode.register_agent`, they specify a `space` (e.g. Docker container name). This gets embedded in the JWT. Shell-server reads `CallerIdentity.space` per request.
+- **cwd tracking**: `exec_command` maintains a working directory per session (keyed by space/container). `cd /workspace` persists for subsequent commands.
+- **Docker lazy-init**: The Docker client is only created on the first container exec, not at startup.
+- **Docker optional**: The `docker` Python package is only needed for container modes (`uv sync --extra container`).
 
 ## License
 
