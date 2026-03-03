@@ -1,0 +1,13 @@
+[package]
+name = "shell_server"
+version = "0.1.0"
+description = "MCP Server exposing shell execution tools — exec_command, read_file, write_file, list_dir"
+authors = ["Tagentacle Contributors"]
+type = "executable"
+
+[entry_points]
+node = "shell_server:main"
+
+[dependencies]
+python = ["tagentacle-py-mcp"]
+system = ["docker"]
