@@ -1,7 +1,7 @@
 [package]
 name = "shell_server"
 version = "0.1.0"
-description = "MCP Server exposing shell execution tools — exec_command, read_file, write_file, list_dir"
+description = "MCP Server exposing exec_command for container shell execution"
 authors = ["Tagentacle Contributors"]
 type = "executable"
 

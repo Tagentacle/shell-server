@@ -1,22 +1,16 @@
 """
 Tagentacle Shell Server: MCP Server for Container Shell Execution.
 
-An MCPServerNode that provides file and shell tools targeting a specific
-Docker container. Agents connect to this server via MCP (Streamable HTTP)
-and can execute commands, read/write files, and list directories inside
-the target container.
+An MCPServerNode that provides a single ``exec_command`` tool targeting a
+specific Docker container. Agents connect via MCP (Streamable HTTP) and
+execute arbitrary shell commands — cat, ls, tee, etc. are all just commands.
 
 Key design:
+  - Single tool: exec_command (read/write/list are just shell commands)
   - Maintains per-session ``cwd`` state (simulates a persistent shell)
   - Uses ``docker exec`` under the hood
   - Can be TACL-protected: ``auth_required=True``
   - Target container is configured via env or bringup config
-
-MCP Tools:
-  exec_command  — Execute a shell command in the container
-  read_file     — Read a file from the container
-  write_file    — Write content to a file in the container
-  list_dir      — List directory contents in the container
 """
 
 import asyncio
@@ -186,83 +180,6 @@ class ShellServer(MCPServerNode):
                 parts.append(f"[exit_code: {exit_code}]")
             
             return "\n".join(parts) if parts else "(no output)"
-
-        @self.mcp.tool(description="Read a file from the target container")
-        def read_file(
-            path: Annotated[str, Field(description="Absolute path to the file inside the container")],
-            container: Annotated[Optional[str], Field(description="Target container name/id (optional)")] = None,
-        ) -> str:
-            try:
-                cid = self._resolve_container(container)
-            except ValueError as e:
-                return str(e)
-
-            try:
-                exit_code, stdout, stderr = self._docker_exec(
-                    cid, ["cat", path]
-                )
-                if exit_code != 0:
-                    return f"Error reading {path}: {stderr}"
-                # Truncate
-                if len(stdout) > 128 * 1024:
-                    stdout = stdout[:128 * 1024] + "\n... (truncated)"
-                return stdout
-            except NotFound:
-                return f"Error: Container '{cid}' not found"
-            except APIError as e:
-                return f"Docker API error: {e}"
-
-        @self.mcp.tool(description="Write content to a file in the target container")
-        def write_file(
-            path: Annotated[str, Field(description="Absolute path to write inside the container")],
-            content: Annotated[str, Field(description="File content to write")],
-            container: Annotated[Optional[str], Field(description="Target container name/id (optional)")] = None,
-        ) -> str:
-            try:
-                cid = self._resolve_container(container)
-            except ValueError as e:
-                return str(e)
-
-            try:
-                # Use printf to handle content safely, writing via sh
-                # Escape single quotes in content
-                escaped = content.replace("'", "'\\''")
-                exit_code, stdout, stderr = self._docker_exec(
-                    cid,
-                    ["sh", "-c", f"mkdir -p \"$(dirname '{path}')\" && printf '%s' '{escaped}' > '{path}'"],
-                )
-                if exit_code != 0:
-                    return f"Error writing {path}: {stderr}"
-                return f"Written {len(content)} bytes to {path}"
-            except NotFound:
-                return f"Error: Container '{cid}' not found"
-            except APIError as e:
-                return f"Docker API error: {e}"
-
-        @self.mcp.tool(description="List directory contents in the target container")
-        def list_dir(
-            path: Annotated[Optional[str], Field(description="Directory path (default: current cwd)")] = None,
-            container: Annotated[Optional[str], Field(description="Target container name/id (optional)")] = None,
-        ) -> str:
-            try:
-                cid = self._resolve_container(container)
-            except ValueError as e:
-                return str(e)
-
-            session_key = cid
-            target_dir = path or self._get_cwd(session_key)
-
-            try:
-                exit_code, stdout, stderr = self._docker_exec(
-                    cid, ["ls", "-la", target_dir]
-                )
-                if exit_code != 0:
-                    return f"Error listing {target_dir}: {stderr}"
-                return stdout
-            except NotFound:
-                return f"Error: Container '{cid}' not found"
-            except APIError as e:
-                return f"Docker API error: {e}"
 
         # Call super AFTER registering tools (MCPServerNode reads port config)
         super().on_configure(config)

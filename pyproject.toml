@@ -1,7 +1,7 @@
 [project]
 name = "shell-server"
 version = "0.1.0"
-description = "MCP Server node providing shell execution tools for Tagentacle containers"
+description = "MCP Server node providing exec_command for Tagentacle container shell execution"
 requires-python = ">=3.10"
 dependencies = [
     "tagentacle-py-core>=0.1.0",

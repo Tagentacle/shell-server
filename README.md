@@ -1,15 +1,12 @@
 # shell-server
 
-MCP Server node providing shell execution tools for Tagentacle containers. Agents connect via MCP (Streamable HTTP) and can run commands, read/write files, and list directories inside a target Docker container.
+MCP Server node providing `exec_command` for Tagentacle containers. Agents connect via MCP (Streamable HTTP) and execute shell commands inside a target Docker container. Reading files, writing files, listing directories — these are all just shell commands (`cat`, `tee`, `ls`).
 
 ## MCP Tools
 
 | Tool | Description |
 |---|---|
 | `exec_command` | Execute a shell command in the target container (maintains `cwd` across calls) |
-| `read_file` | Read a file from the container |
-| `write_file` | Write content to a file in the container |
-| `list_dir` | List directory contents |
 
 ## Quick Start
 
@@ -52,15 +49,12 @@ config = { target_container = "agent_space_1", mcp_port = 8300 }
 ```
 Agent ──MCP──► shell-server ──docker exec──► container
   │                │
-  │ exec_command   │ sh -c "ls -la"
-  │ read_file      │ cat /path/to/file
-  │ write_file     │ printf '...' > /path
-  │ list_dir       │ ls -la /dir
+  │ exec_command   │ sh -c "<any command>"
 ```
 
 - **cwd tracking**: `exec_command` maintains a per-container working directory across calls. Running `cd /workspace` changes the cwd for subsequent commands.
-- **TACL support**: Set `SHELL_AUTH_REQUIRED=true` to require JWT auth. Only agents with valid credentials (issued by `PermissionMCPServerNode`) can use the tools.
-- **Container override**: Each tool accepts an optional `container` parameter to target a different container per-call.
+- **TACL support**: Set `SHELL_AUTH_REQUIRED=true` to require JWT auth. Only agents with valid credentials (issued by `PermissionMCPServerNode`) can use the tool.
+- **Container override**: `exec_command` accepts an optional `container` parameter to target a different container per-call.
 
 ## License
 
