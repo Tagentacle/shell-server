@@ -6,12 +6,12 @@ three execution modes:
 
   - **TACL mode** (``auth_required=True``, recommended for production):
     Each agent's JWT carries a ``space`` claim identifying its isolated
-    execution environment (Docker container).  One shell-server instance
+    execution environment (container).  One shell-server instance
     serves multiple agents, dynamically routing commands based on the
     caller's ``space``.
 
   - **Static container mode** (``TARGET_CONTAINER=xxx``):
-    All commands are routed to a single, fixed Docker container.
+    All commands are routed to a single, fixed container.
     Useful for development / single-agent setups.
 
   - **Local mode** (default):
@@ -21,7 +21,7 @@ Key design:
   - Single tool: exec_command
   - Maintains per-session ``cwd`` state (simulates a persistent shell)
   - TACL ``space`` claim is the primary container resolution mechanism
-  - Docker dependency is optional — only needed when containers are used
+  - Container runtime (Podman/Docker) is optional — only needed when containers are used
 """
 
 import asyncio
@@ -66,7 +66,7 @@ class ShellServer(MCPServerNode):
         self._static_container = (
             target_container or os.environ.get("TARGET_CONTAINER") or None
         )
-        self._docker = None  # Lazy-init when first container exec is needed
+        self._runtime = None  # Lazy-init when first container exec is needed
         # Per-session cwd tracking: session_key -> cwd path
         self._session_cwd: Dict[str, str] = {}
 
@@ -116,17 +116,10 @@ class ShellServer(MCPServerNode):
             return (1, "", str(e))
 
     def _exec_container(self, container_name: str, command: str, workdir: str) -> tuple:
-        """Execute via docker exec. Returns (exit_code, stdout, stderr)."""
-        self._ensure_docker()
-        container = self._docker.containers.get(container_name)
-        exit_code, output = container.exec_run(
-            ["sh", "-c", command],
-            workdir=workdir,
-            demux=True,
-        )
-        stdout = output[0].decode("utf-8", errors="replace") if output[0] else ""
-        stderr = output[1].decode("utf-8", errors="replace") if output[1] else ""
-        return exit_code, stdout, stderr
+        """Execute via container exec. Returns (exit_code, stdout, stderr)."""
+        self._ensure_runtime()
+        result = self._runtime.exec(container_name, command, workdir=workdir)
+        return result.exit_code, result.stdout, result.stderr
 
     def _exec(self, space: Optional[str], command: str, workdir: str) -> tuple:
         """Route to the appropriate backend based on resolved space."""
@@ -135,21 +128,16 @@ class ShellServer(MCPServerNode):
         else:
             return self._exec_local(command, workdir)
 
-    def _ensure_docker(self):
-        """Lazily initialize Docker client on first container exec."""
-        if self._docker is not None:
+    def _ensure_runtime(self):
+        """Lazily initialize container runtime on first container exec."""
+        if self._runtime is not None:
             return
         try:
-            import docker
-            docker_url = os.environ.get("DOCKER_HOST")
-            if docker_url:
-                self._docker = docker.DockerClient(base_url=docker_url)
-            else:
-                self._docker = docker.from_env()
-            self._docker.ping()
-            logger.info("Docker client connected (lazy init)")
+            from container_runtime import ContainerRuntime
+            self._runtime = ContainerRuntime.connect()
+            logger.info(f"Container runtime connected: {self._runtime.backend} (lazy init)")
         except Exception as e:
-            raise RuntimeError(f"Docker unavailable: {e}") from e
+            raise RuntimeError(f"Container runtime unavailable: {e}") from e
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -215,13 +203,10 @@ class ShellServer(MCPServerNode):
         super().on_configure(config)
 
     def on_shutdown(self):
-        """Clean up Docker client if used."""
-        if self._docker:
-            try:
-                self._docker.close()
-            except Exception:
-                pass
-            self._docker = None
+        """Clean up container runtime client if used."""
+        if self._runtime:
+            self._runtime.close()
+            self._runtime = None
         logger.info("Shell server shut down.")
 
 

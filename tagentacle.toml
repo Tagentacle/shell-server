@@ -10,5 +10,6 @@ node = "shell_server:main"
 
 [dependencies]
 python = ["tagentacle-py-mcp"]
-# docker is optional — only needed when TARGET_CONTAINER is set
-# system = ["docker"]
+# Container runtime is optional — only needed when TARGET_CONTAINER is set
+# Install ONE of: pip install podman  OR  pip install docker
+# system = ["podman"]
