@@ -2,7 +2,7 @@
 
 MCP Server providing `exec_command` — a single tool for shell execution. Supports three modes:
 
-- **TACL mode** (recommended): `auth_required=True` — each agent's JWT carries a `space` claim identifying its Docker container. One shell-server serves all agents, routing dynamically.
+- **TACL mode** (recommended): `auth_required=True` — each agent's JWT carries a `space` claim identifying its container. One shell-server serves all agents, routing dynamically.
 - **Static container mode**: `TARGET_CONTAINER=xxx` — all commands go to one fixed container.
 - **Local mode** (default): runs commands on the host via `subprocess`.
 
@@ -18,7 +18,6 @@ Reading files, writing files, listing directories — these are all just shell c
 
 ```bash
 cd shell-server
-uv sync
 
 # Local mode (default) — execute on host
 python shell_server.py
@@ -29,8 +28,9 @@ TARGET_CONTAINER=agent_space_1 python shell_server.py
 # TACL mode — dynamic routing from JWT space claim (production)
 SHELL_AUTH_REQUIRED=true python shell_server.py
 
-# Install docker extra for container modes
-uv sync --extra container
+# Install container backend (pick one)
+pip install podman   # Podman (recommended)
+pip install docker   # Docker
 ```
 
 The MCP endpoint will be available at `http://127.0.0.1:8300/mcp`.
@@ -39,7 +39,7 @@ The MCP endpoint will be available at `http://127.0.0.1:8300/mcp`.
 
 When `exec_command` is called, the target is resolved in this order:
 
-1. **TACL JWT `space` claim** — if `auth_required=True` and the caller's JWT contains a `space` field, that value is used as the Docker container name.
+1. **TACL JWT `space` claim** — if `auth_required=True` and the caller's JWT contains a `space` field, that value is used as the container name.
 2. **Static `TARGET_CONTAINER`** — fallback if no `space` in JWT.
 3. **Local subprocess** — if no container is resolved at all.
 
@@ -55,6 +55,8 @@ This means a single shell-server instance can serve many agents, each routed to 
 | `TARGET_CONTAINER` | _(none)_ | Static container fallback. Omit for local mode |
 | `MCP_PORT` | `8300` | HTTP port for MCP endpoint |
 | `TAGENTACLE_DAEMON_URL` | `tcp://127.0.0.1:19999` | Daemon address |
+| `CONTAINER_RUNTIME` | _(auto-detect)_ | Force `podman` or `docker` backend |
+| `CONTAINER_HOST` | _(system default)_ | Podman daemon socket URL (container modes only) |
 | `DOCKER_HOST` | _(system default)_ | Docker daemon socket URL (container modes only) |
 
 ### Bringup Config
@@ -80,20 +82,20 @@ config = { mcp_port = 8300 }
 
 ```
 # TACL mode: JWT space → container routing
-Agent A (space=container_1) ──MCP──► shell-server ──docker exec──► container_1
-Agent B (space=container_2) ──MCP──► shell-server ──docker exec──► container_2
+Agent A (space=container_1) ──MCP──► shell-server ──container exec──► container_1
+Agent B (space=container_2) ──MCP──► shell-server ──container exec──► container_2
 
 # Static mode
-Agent ──MCP──► shell-server ──docker exec──► fixed container
+Agent ──MCP──► shell-server ──container exec──► fixed container
 
 # Local mode
 Agent ──MCP──► shell-server ──subprocess──► host shell
 ```
 
-- **TACL space binding**: When admin registers an agent via `PermissionMCPServerNode.register_agent`, they specify a `space` (e.g. Docker container name). This gets embedded in the JWT. Shell-server reads `CallerIdentity.space` per request.
+- **TACL space binding**: When admin registers an agent via `PermissionMCPServerNode.register_agent`, they specify a `space` (e.g. container name). This gets embedded in the JWT. Shell-server reads `CallerIdentity.space` per request.
 - **cwd tracking**: `exec_command` maintains a working directory per session (keyed by space/container). `cd /workspace` persists for subsequent commands.
-- **Docker lazy-init**: The Docker client is only created on the first container exec, not at startup.
-- **Docker optional**: The `docker` Python package is only needed for container modes (`uv sync --extra container`).
+- **Runtime lazy-init**: The container runtime client is only created on the first container exec, not at startup.
+- **Runtime optional**: `podman` or `docker` Python package is only needed for container modes.
 
 ## License
 
