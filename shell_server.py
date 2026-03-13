@@ -134,8 +134,11 @@ class ShellServer(MCPServerNode):
             return
         try:
             from container_runtime import ContainerRuntime
+
             self._runtime = ContainerRuntime.connect()
-            logger.info(f"Container runtime connected: {self._runtime.backend} (lazy init)")
+            logger.info(
+                f"Container runtime connected: {self._runtime.backend} (lazy init)"
+            )
         except Exception as e:
             raise RuntimeError(f"Container runtime unavailable: {e}") from e
 
@@ -148,15 +151,20 @@ class ShellServer(MCPServerNode):
 
         # ── Register MCP Tool ───────────────────────────────────────
 
-        @self.mcp.tool(description=(
-            "Execute a shell command. "
-            "Target is resolved from TACL space claim, "
-            "static container config, or local host. "
-            "Maintains cwd across calls."
-        ))
+        @self.mcp.tool(
+            description=(
+                "Execute a shell command. "
+                "Target is resolved from TACL space claim, "
+                "static container config, or local host. "
+                "Maintains cwd across calls."
+            )
+        )
         def exec_command(
             command: Annotated[str, Field(description="Shell command to execute")],
-            cwd: Annotated[Optional[str], Field(description="Override working directory for this command")] = None,
+            cwd: Annotated[
+                Optional[str],
+                Field(description="Override working directory for this command"),
+            ] = None,
         ) -> str:
             space = self._resolve_space()
             session_key = space or "_local_"
@@ -230,7 +238,9 @@ async def main():
     if auth:
         logger.info(f"Shell Server ready at {node.mcp_url} (TACL auth, space from JWT)")
     elif static:
-        logger.info(f"Shell Server ready at {node.mcp_url} (static container: {static})")
+        logger.info(
+            f"Shell Server ready at {node.mcp_url} (static container: {static})"
+        )
     else:
         logger.info(f"Shell Server ready at {node.mcp_url} (local mode)")
     await node.spin()

@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
@@ -31,6 +30,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ContainerInfo:
     """Normalized container metadata."""
+
     id: str
     short_id: str
     name: str
@@ -42,6 +42,7 @@ class ContainerInfo:
 @dataclass
 class ExecResult:
     """Result of executing a command in a container."""
+
     exit_code: int
     stdout: str
     stderr: str

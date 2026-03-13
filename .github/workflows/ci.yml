@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv tool run ruff check .
+      - run: uv tool run ruff format --check .
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Tagentacle/python-sdk-core
+          path: ../python-sdk-core
+      - uses: actions/checkout@v4
+        with:
+          repository: Tagentacle/python-sdk-mcp
+          path: ../python-sdk-mcp
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
