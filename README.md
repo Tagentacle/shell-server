@@ -92,7 +92,7 @@ Agent ──MCP──► shell-server ──container exec──► fixed contai
 Agent ──MCP──► shell-server ──subprocess──► host shell
 ```
 
-- **TACL space binding**: When admin registers an agent via `PermissionMCPServerNode.register_agent`, they specify a `space` (e.g. container name). This gets embedded in the JWT. Shell-server reads `CallerIdentity.space` per request.
+- **TACL space binding**: When admin registers an agent via `TACLAuthority.register_agent`, they specify a `space` (e.g. container name). This gets embedded in the JWT. Shell-server reads `CallerIdentity.space` per request.
 - **cwd tracking**: `exec_command` maintains a working directory per session (keyed by space/container). `cd /workspace` persists for subsequent commands.
 - **Runtime lazy-init**: The container runtime client is only created on the first container exec, not at startup.
 - **Runtime optional**: `podman` or `docker` Python package is only needed for container modes.

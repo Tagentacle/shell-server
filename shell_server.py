@@ -1,8 +1,8 @@
 """
 Tagentacle Shell Server: MCP Server for Shell Execution.
 
-An MCPServerNode that provides a single ``exec_command`` tool.  Supports
-three execution modes:
+A LifecycleNode + MCPServerComponent that provides a single ``exec_command``
+tool.  Supports three execution modes:
 
   - **TACL mode** (``auth_required=True``, recommended for production):
     Each agent's JWT carries a ``space`` claim identifying its isolated
@@ -32,15 +32,18 @@ from typing import Annotated, Any, Dict, Optional
 
 from pydantic import Field
 
-from tagentacle_py_mcp import MCPServerNode
+from tagentacle_py_core import LifecycleNode
+from tagentacle_py_mcp import MCPServerComponent
 from tagentacle_py_mcp.auth import get_caller_identity
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class ShellServer(MCPServerNode):
+class ShellServer(LifecycleNode):
     """MCP Server providing exec_command with dynamic container routing.
+
+    Uses LifecycleNode + MCPServerComponent (composition, not inheritance).
 
     Container resolution order:
       1. TACL JWT ``space`` claim (per-request, from caller identity)
@@ -56,13 +59,15 @@ class ShellServer(MCPServerNode):
         auth_required: bool = False,
         target_container: Optional[str] = None,
     ):
-        super().__init__(
-            node_id,
+        super().__init__(node_id)
+        self._mcp_component = MCPServerComponent(
+            server_id=node_id,
             mcp_name="shell-server",
             mcp_port=mcp_port,
             description="Shell execution MCP server (TACL / container / local)",
             auth_required=auth_required,
         )
+        self.mcp = self._mcp_component.mcp
         self._static_container = (
             target_container or os.environ.get("TARGET_CONTAINER") or None
         )
@@ -207,11 +212,17 @@ class ShellServer(MCPServerNode):
 
             return "\n".join(parts) if parts else "(no output)"
 
-        # Call super AFTER registering tools
-        super().on_configure(config)
+        self._mcp_component.configure(config)
 
-    def on_shutdown(self):
-        """Clean up container runtime client if used."""
+    async def on_activate(self):
+        await self._mcp_component.start(publish_fn=self.publish)
+
+    async def on_deactivate(self):
+        await self._mcp_component.stop(publish_fn=self.publish)
+
+    async def on_shutdown(self):
+        """Clean up MCP component and container runtime client."""
+        await self._mcp_component.shutdown()
         if self._runtime:
             self._runtime.close()
             self._runtime = None
@@ -235,14 +246,13 @@ async def main():
 
     await node.bringup(config)
 
+    mcp_url = node._mcp_component.mcp_url
     if auth:
-        logger.info(f"Shell Server ready at {node.mcp_url} (TACL auth, space from JWT)")
+        logger.info(f"Shell Server ready at {mcp_url} (TACL auth, space from JWT)")
     elif static:
-        logger.info(
-            f"Shell Server ready at {node.mcp_url} (static container: {static})"
-        )
+        logger.info(f"Shell Server ready at {mcp_url} (static container: {static})")
     else:
-        logger.info(f"Shell Server ready at {node.mcp_url} (local mode)")
+        logger.info(f"Shell Server ready at {mcp_url} (local mode)")
     await node.spin()
 
 
