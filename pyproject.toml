@@ -13,8 +13,8 @@ podman = ["podman>=5.0.0"]
 docker = ["docker>=7.0.0"]
 
 [tool.uv.sources]
-tagentacle-py-core = { path = "../python-sdk-core", editable = true }
-tagentacle-py-mcp = { path = "../python-sdk-mcp", editable = true }
+tagentacle-py-core = { path = "../tagentacle-py-core", editable = true }
+tagentacle-py-mcp = { path = "../tagentacle-py-mcp", editable = true }
 
 [build-system]
 requires = ["hatchling"]
