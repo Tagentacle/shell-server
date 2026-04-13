@@ -1,12 +1,12 @@
 [package]
-name = "shell_server"
+name = "shell_mcp"
 version = "0.2.0"
 description = "MCP Server providing exec_command (TACL space / container / local)"
 authors = ["Tagentacle Contributors"]
 type = "executable"
 
 [entry_points]
-node = "shell_server:main"
+node = "shell_mcp:main"
 
 [dependencies]
 python = ["tagentacle-py-mcp"]
