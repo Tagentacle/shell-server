@@ -1,5 +1,5 @@
 [project]
-name = "shell-server"
+name = "shell-mcp"
 version = "0.2.0"
 description = "MCP Server providing exec_command (TACL space / container / local)"
 requires-python = ">=3.10"

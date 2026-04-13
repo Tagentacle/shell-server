@@ -1,12 +1,12 @@
 """
-Tagentacle Shell Server: MCP Server for Shell Execution.
+Tagentacle Shell MCP: MCP Server for Shell Execution.
 
 A LifecycleNode + MCPServerComponent that provides a single ``exec_command``
 tool.  Supports three execution modes:
 
   - **TACL mode** (``auth_required=True``, recommended for production):
     Each agent's JWT carries a ``space`` claim identifying its isolated
-    execution environment (container).  One shell-server instance
+    execution environment (container).  One shell-mcp instance
     serves multiple agents, dynamically routing commands based on the
     caller's ``space``.
 
@@ -53,7 +53,7 @@ class ShellServer(LifecycleNode):
 
     def __init__(
         self,
-        node_id: str = "shell_server",
+        node_id: str = "shell_mcp",
         *,
         mcp_port: int = 8300,
         auth_required: bool = False,
@@ -62,7 +62,7 @@ class ShellServer(LifecycleNode):
         super().__init__(node_id)
         self._mcp_component = MCPServerComponent(
             server_id=node_id,
-            mcp_name="shell-server",
+            mcp_name="shell-mcp",
             mcp_port=mcp_port,
             description="Shell execution MCP server (TACL / container / local)",
             auth_required=auth_required,
